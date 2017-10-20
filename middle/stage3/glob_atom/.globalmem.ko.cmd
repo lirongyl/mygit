@@ -1,0 +1,1 @@
+cmd_/home/shanll/Train/mygit/middle/stage3/glob_atom/globalmem.ko := ld -r -m elf_x86_64 -T /usr/src/linux-headers-3.13.0-132-generic/scripts/module-common.lds --build-id  -o /home/shanll/Train/mygit/middle/stage3/glob_atom/globalmem.ko /home/shanll/Train/mygit/middle/stage3/glob_atom/globalmem.o /home/shanll/Train/mygit/middle/stage3/glob_atom/globalmem.mod.o
