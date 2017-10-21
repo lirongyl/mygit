@@ -13,7 +13,6 @@
 #include <linux/init.h>
 #include <linux/cdev.h>
 #include <asm/io.h>
-//#include <asm/system.h>
 #include <asm/uaccess.h>
 #include <linux/slab.h>
 
@@ -34,6 +33,9 @@ struct globalmem_dev *globalmem_devp;	/*设备结构体指针实例*/
 /**************文件打开函数*********************/
 int globalmem_open(struct inode *inode,struct file *filp)
 {
+	/*struct globalmem_dev *dev;
+
+	dev = container_of(inode->i_cdev,struct globalmem_dev,cdev);*/
 	/*将设备结构体指针赋值给文件私有数据指针*/
 	filp->private_data = globalmem_devp;
 	return 0;
@@ -46,7 +48,7 @@ int globalmem_release(struct inode *inode,struct file *filp)
 }
 
 /******************globalmem设备的ioctl控制函数************************/
-static int globalmem_ioctl(struct inode *inodep, struct file *filp, unsigned int cmd,unsigned long arg)
+static long globalmem_ioctl( struct file *filp, unsigned int cmd,unsigned long arg)
 {
 	struct globalmem_dev *dev = filp->private_data;	/*获取设备结构体指针*/
 	
@@ -75,7 +77,7 @@ static ssize_t globalmem_read(struct file *filp,char __user *buf,size_t size,lof
 	if(p >= GLOBALMEM_SIZE)	/*要读的偏移位置越界*/
 		return 0;
 	if(count > GLOBALMEM_SIZE - p) /*要读的字节数太大*/
-		count = GLOBALMEM_SIZE -p;
+		count = GLOBALMEM_SIZE - p;
 	
 	/* 内核空间 -- 用户空间 */
 	if(copy_to_user(buf,(void*)(dev->mem + p), count))
@@ -84,7 +86,7 @@ static ssize_t globalmem_read(struct file *filp,char __user *buf,size_t size,lof
 		*ppos += count;
 		ret = count;
 
-		printk("read %u bytes from %lu\n",count,p);
+		printk(KERN_INFO "read %u bytes from %lu\n",count,p);
 	}
 
 	return ret;
@@ -110,7 +112,7 @@ static ssize_t globalmem_write(struct file *filp,const char __user *buf,size_t s
 	else {
 		*ppos += count;
 		ret = count;
-		printk("written %u bytes from %lu\n",count,p);
+		printk(KERN_INFO "written %u bytes from %lu\n",count,p);
 	}
 
 	return ret;
@@ -217,5 +219,8 @@ void globalmem_exit(void)
 	unregister_chrdev_region(MKDEV(globalmem_major,0),1);	/*注销设备区域*/
 }
 
+module_param(globalmem_major,int,S_IRUGO);
+module_init(globalmem_init);
+module_exit(globalmem_exit);
 MODULE_LICENSE("GPL");
 

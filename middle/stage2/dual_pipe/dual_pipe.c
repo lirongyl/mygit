@@ -1,8 +1,14 @@
-/*管道是半双工的，这里通过创建两个管道实现全双工的读写通信*/
-#include <stdlib.h>
+/********************************************************************
+**	管道是半双工的，这里通过创建两个管道实现全双工的读写通信
+**	实现进程的管道同步通信i
+*********************************************************************/
+#include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <string.h>
+#include <wait.h>
+#include <sys/stat.h>
 
 //子进程读写管道的函数
 void child_rw_pipe(int readfd,int writefd)

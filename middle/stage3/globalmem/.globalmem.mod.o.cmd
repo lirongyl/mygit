@@ -3,6 +3,7 @@ cmd_/home/shanll/Train/mygit/middle/stage3/globalmem/globalmem.mod.o := gcc -Wp,
 source_/home/shanll/Train/mygit/middle/stage3/globalmem/globalmem.mod.o := /home/shanll/Train/mygit/middle/stage3/globalmem/globalmem.mod.c
 
 deps_/home/shanll/Train/mygit/middle/stage3/globalmem/globalmem.mod.o := \
+    $(wildcard include/config/module/unload.h) \
   include/linux/module.h \
     $(wildcard include/config/sysfs.h) \
     $(wildcard include/config/module/sig.h) \
@@ -15,7 +16,6 @@ deps_/home/shanll/Train/mygit/middle/stage3/globalmem/globalmem.mod.o := \
     $(wildcard include/config/tracing.h) \
     $(wildcard include/config/event/tracing.h) \
     $(wildcard include/config/ftrace/mcount/record.h) \
-    $(wildcard include/config/module/unload.h) \
     $(wildcard include/config/constructors.h) \
     $(wildcard include/config/debug/set/module/ronx.h) \
   include/linux/list.h \

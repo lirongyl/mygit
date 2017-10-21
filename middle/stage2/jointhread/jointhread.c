@@ -1,4 +1,5 @@
 /*主线程通过pthread_join等待辅助线程终止的实例*/
+/*运行中主线程将会被堵塞*/
 #include <stdio.h>
 #include <pthread.h>
 

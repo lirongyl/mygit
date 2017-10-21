@@ -20,6 +20,7 @@ void my_err(const char *err_string,int line)
 int main(int argc,char **argv)
 {
 	int fd;
+	int i;
 	char write_buf[32] = "Hello Kernel!";
 	char read_buf[64];
 	int len = 0;
@@ -41,11 +42,15 @@ int main(int argc,char **argv)
 	}
 
 	/*读数据*/
-	if( (len = read(fd,read_buf,64)) < 0){
+	len = lseek(fd,0,SEEK_CUR);
+	lseek(fd,0,SEEK_SET);
+	if( (len = read(fd,read_buf,len)) < 0){
 		my_err("read",__LINE__);
 	} else {
 		printf("read data success!\n");
-		printf("%s\n",write_buf);
+		for(i=0;i<len;i++)
+			printf("%c",read_buf[i]);
+		printf("\n");
 	}
 
 	close(fd);

@@ -1,4 +1,4 @@
-obj-m += globalmem.o				#由此目标文件生成模块
+obj-m += globalfifo.o				#由此目标文件生成模块
 CURRENT_PATH := $(shell pwd)		#当前所在的路径
 LINUX_KERNEL := $(shell uname -r)	#内核的版本号
 
