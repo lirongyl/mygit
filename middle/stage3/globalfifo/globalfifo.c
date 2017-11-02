@@ -1,10 +1,10 @@
-/*******************************************************************************************
+/******************************************************************
 **	globalfifo虚拟设备实例
-**	支持阻塞操作的设备驱动
-**	2017-10-20
-*******************************************************************************************/
+**	支持堵塞操作的globalfifo驱动
+**	2017-11-02
+******************************************************************/
 
-/*********************************设备结构体和宏*******************************************/
+/*********************设备结构体和宏*****************************/
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/fs.h>
@@ -16,23 +16,22 @@
 #include <asm/io.h>
 #include <asm/uaccess.h>
 #include <linux/slab.h>
-#include <linux/sched.h>
-#include <linux/semaphore.h>
+#include <linux/mutex.h>
 
-#define GLOBALFIFO_SIZE		0x1000	/*全局内存大小：4KB*/
-#define FIFO_CLEAR			0x01	/*清零全局变量*/
+#define GLOBALFIFO_SIZE	0x1000	/*全局内存大小：4KB*/
+#define MEM_CLEAR		0x01	/*清零全局变量*/
 #define GLOBALFIFO_MAJOR	250		/*预设主设备号*/
 
 static int globalfifo_major = GLOBALFIFO_MAJOR;
 
 /*********************globalfifo设备结构体****************/
 struct globalfifo_dev{
-	struct cdev cdev;					/*cdev结构体*/
-	unsigned int current_len;			/*fifo有效数据长度*/
-	unsigned char mem[GLOBALFIFO_SIZE];	/*全局内存变量*/
-	struct semaphore sem;				/*并发控制的信号量*/
-	wait_queue_head_t r_wait;			/*堵塞读用的等待队列头*/
-	wait_queue_head_t w_wait;			/*堵塞写用的等待队列头*/
+	struct cdev cdev;	/*cdev结构体*/
+	unsigned int current_len;	/*fifo有效数据长度*/
+	unsigned char mem[GLOBALFIFO_SIZE];	/*全局变量*/
+	struct semaphore sem;	/*并发控制用的信号量*/
+	wait_queue_head_t r_wait;	/*阻塞读用的等待队列头*/
+	wait_queue_head_t w_wait;	/*阻塞写用的等待队列头*/
 };
 
 struct globalfifo_dev *globalfifo_devp;	/*设备结构体指针实例*/
@@ -60,9 +59,13 @@ static long globalfifo_ioctl( struct file *filp, unsigned int cmd,unsigned long 
 	struct globalfifo_dev *dev = filp->private_data;	/*获取设备结构体指针*/
 	
 	switch(cmd){
-	case FIFO_CLEAR:
+	case MEM_CLEAR:
+
+		if(down_interruptible(&dev->sem))
+			return -ERESTARTSYS;
 		/*清除全局变量*/
 		memset(dev->mem,0,GLOBALFIFO_SIZE);
+		up(&dev->sem);	//释放信号量
 		printk("globalfifo is set to zero\n");
 		break;
 	default:
@@ -72,101 +75,107 @@ static long globalfifo_ioctl( struct file *filp, unsigned int cmd,unsigned long 
 }
 
 /**************globalfifo设备驱动读函数************************/
-static ssize_t globalfifo_read(struct file *filp,char __user *buf,size_t count,loff_t *ppos)
+static ssize_t globalfifo_read(struct file *filp,char __user *buf,size_t size,loff_t *ppos)
 {
+	//unsigned long p = *ppos;
+	unsigned int count = size;
 	int ret = 0;
 	
 	struct globalfifo_dev *dev = filp->private_data;	/*获取设备结构体指针*/
-	
-	/*定义等待队列*/
-	DECLARE_WAITQUEUE(wait,current);	
-	/*获得信号量*/
+	DECLARE_WAITQUEUE(wait,current);	//定义等待队列
 	down(&dev->sem);
-	/*进入读等待队列头*/
-	add_wait_queue(&dev->r_wait,&wait);	
+	add_wait_queue(&dev->r_wait,&wait);	//进入等待队列头
 	/*等待FIFO非空*/
 	while(dev->current_len == 0){
 		if(filp->f_flags & O_NONBLOCK){
 			ret = -EAGAIN;
 			goto out;
 		}
-		__set_current_state(TASK_INTERRUPTIBLE);	/*改变进程为睡眠状态*/
+		__set_current_state(TASK_INTERRUPTIBLE);	//改变进程状态为睡眠
 		up(&dev->sem);
 
-		schedule();	/*调度其他进程执行*/
+		schedule();		//调度其他进程执行
+
 		if(signal_pending(current)){
 			ret = -ERESTARTSYS;
 			goto out2;
 		}
 		down(&dev->sem);
 	}
-	
-	/* 内核空间 -- 用户空间 */
-	if(count > dev->current_len)
-		count = dev->current_len;
+	//分析和获取有效读长度
+	/*if(p >= GLOBALFIFO_SIZE)	//要读的偏移位置越界
+		return 0;
+	if(count > GLOBALFIFO_SIZE - p) //要读的字节数太大
+		count = GLOBALFIFO_SIZE - p;
 
+	if(down_interruptible(&dev->sem)){	//获取信号量
+		return -ERESTARTSYS;
+	}*/
+
+	if(count > dev->current_len)
+		count =  dev->current_len;
+
+	/* 内核空间 -- 用户空间 */
 	if(copy_to_user(buf,dev->mem, count)){
 		ret = -EFAULT;
 		goto out;
 	} else {
-		memcpy(dev->mem,dev->mem + count,dev->current_len - count);	/*fifo数据前移*/
-		dev->current_len -= count;	//有效数据长度减少
-		printk(KERN_INFO "read %d bytes,current_len %d\n",count,dev->current_len);
-
-		wake_up_interruptible(&dev->w_wait);	/*唤醒写等待队列*/
-		
-		ret = count;
+		memcpy(dev->mem,dev->mem+count,dev->current_len-count);//fifo数据前移
+		dev->current_len -= count;	//有效长度减少
+		printk(KERN_INFO "read %u bytes from %u\n",count,dev->current_len);
+		wake_up_interruptible(&dev->w_wait);	//唤醒写等待队列
+		ret =  count;
 	}
-
-out:	up(&dev->sem);	/*释放信号量*/
-out2:	remove_wait_queue(&dev->w_wait,&wait);		/*移除等待队列*/
-
+out:up(&dev->sem);	//释放信号量
+out2:remove_wait_queue(&dev->w_wait,&wait);	//移除等待队列
 	 set_current_state(TASK_RUNNING);
 	return ret;
 }
 
 /****************globalfifo设备驱动写函数*********************/
-static ssize_t globalfifo_write(struct file *filp,const char __user *buf,size_t count,loff_t *ppos)
+static ssize_t globalfifo_write(struct file *filp,const char __user *buf,size_t size,loff_t *ppos)
 {
+	unsigned int count = size;
 	int ret = 0;
 
 	struct globalfifo_dev *dev = filp->private_data;	/*获取设备结构体指针*/
 
-	DECLARE_WAITQUEUE(wait,current);	/*定义等待队列*/
+	DECLARE_WAITQUEUE(wait,current);	//定义等待队列
+	down(&dev->sem);	//获取信号量
+	add_wait_queue(&dev->w_wait,&wait);	//进入写等待队列头
 
-	down(&dev->sem);	/*获取信号量*/
-	add_wait_queue(&dev->w_wait,&wait);	/*进入等待队列头*/
 	/*等待FIFO非满*/
-	while(dev->f_flags & O_NONBLOCK){
-		/*如果是非堵塞访问*/
-		goto out;
-	}
-	__set_current_state(TASK_INTERRUPTIBLE);	/*改变进程状态为睡眠*/
-	up(&dev->sem);
+	while(dev->current_len == GLOBALFIFO_SIZE){
+		if(filp->f_flags & O_NONBLOCK){
+			goto out;
+		}
+		__set_current_state(TASK_INTERRUPTIBLE);	//改变进程状态为睡眠
+		up(&dev->sem);
 
-	schedule();		//调度其他进程执行
-	if(signal_pending(current)){
-		/*如果是因为信号唤醒*/
-		ret = -ERESTARTSYS;
-		goto out2;
+		schedule();		//调度其他进程执行
+		if(signal_pending(current)){
+			ret = -ERESTARTSYS;
+			goto out2;
+		}
+		down(&dev->sem);
 	}
-	down(&dev->sem);
 
-	/*用户空间 -- 内核空间 */
 	if(count > GLOBALFIFO_SIZE - dev->current_len)
 		count = GLOBALFIFO_SIZE - dev->current_len;
+	/*用户空间 -- 内核空间 */
 	if(copy_from_user(dev->mem + dev->current_len,buf,count)){
 		ret = -EFAULT;
 		goto out;
 	} else {
-		dev -> current_len += count;
-		printk(KERN_INFO "written %d bytes,current_len: %d\n",count,dev->current_len);
-		wake_up_interuptiable(&dev->r_wait);
+		dev->current_len += count;
+		printk(KERN_INFO "written %u bytes from %u\n",count,dev->current_len);
+		wake_up_interruptible(&dev->r_wait);
 		ret = count;
 	}
-out:up(&dev->sem);	/*释放信号量*/
+out: up(&dev->sem);	//释放信号量
 out2:remove_wait_queue(&dev->w_wait,&wait);
 	 set_current_state(TASK_RUNNING);
+
 	 return ret;
 }
 
@@ -258,10 +267,9 @@ int globalfifo_init(void)
 
 	globalfifo_setup_cdev(globalfifo_devp,0);
 
-	/*初始化信号量*/
-	sema_init(&globalfifo_devp->sem);
-	init_waitqueue_head(&globalfifo_devp->r_wait);	/*初始化读等待队列头*/
-	init_waitqueue_head(&globalfifo_devp->w_wait);	/*初始化写等待队列头*/
+	sema_init(&globalfifo_devp->sem,1);	//初始化信号量
+	init_waitqueue_head(&globalfifo_devp->r_wait);
+	init_waitqueue_head(&globalfifo_devp->w_wait);
 	return 0;
 
 fail_malloc:
